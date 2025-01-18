@@ -1,0 +1,13 @@
+fluid
+
+.DS_Store
+*.dSYM
+
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
