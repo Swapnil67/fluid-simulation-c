@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <SDL.h>
+#include <unistd.h>
 
 #define SCREEN_WIDTH 900
 #define SCREEN_HEIGHT 600
@@ -15,29 +16,51 @@
 #define COLUMNS SCREEN_WIDTH / CELL_SIZE
 #define ROWS SCREEN_HEIGHT / CELL_SIZE
 
-#define SOLID_CELL 1
 #define WATER_CELL 0
+#define SOLID_CELL 1
 
 typedef struct {
   int type;
-  int fill_level;
+  /* 0 (empty) & 1 (full) */
+  double fill_level;
   int x;
   int y;
 } Cell;
+
+typedef struct
+{
+  double flow_left;
+  double flow_right;
+  double flow_up;
+  double flow_down;
+} CellFlow;
 
 void draw_cell(SDL_Surface *surface, Cell cell) {
   int pixel_x = cell.x * CELL_SIZE;
   int pixel_y = cell.y * CELL_SIZE;
   SDL_Rect cell_rect = (SDL_Rect){pixel_x, pixel_y, CELL_SIZE, CELL_SIZE};
-  Uint32 color = COLOR_WHITE;
+  // * default background color
+  SDL_FillRect(surface, &cell_rect, COLOR_BLACK);
+  // * Water fill level
   if (cell.type == WATER_CELL) {
-    color = COLOR_BLUE;
+    int water_height = cell.fill_level * CELL_SIZE;
+    // printf("%d \n", water_height);
+    int empty_height = CELL_SIZE - water_height;
+    SDL_Rect water_rect = (SDL_Rect){
+        pixel_x,
+        pixel_y + empty_height,
+        CELL_SIZE,
+        water_height};
+    SDL_FillRect(surface, &water_rect, COLOR_BLUE);
   }
-  SDL_FillRect(surface, &cell_rect, color);
+  // * Solid blocks
+  if(cell.type == SOLID_CELL) {
+    SDL_FillRect(surface, &cell_rect, COLOR_WHITE);
+  }
 }
 
 void draw_grid(SDL_Surface *surface) {
-  for (int i = 0; i < COLUMNS; ++i) {
+  for (int i = 0; i < COLUMNS; i++) {
     SDL_Rect column = (SDL_Rect){
         i * CELL_SIZE,
         0,
@@ -45,13 +68,86 @@ void draw_grid(SDL_Surface *surface) {
         SCREEN_HEIGHT};
     SDL_FillRect(surface, &column, COLOR_GRAY);
   }
-  for (int i = 0; i < ROWS; ++i) {
+  for (int i = 0; i < ROWS; i++) {
     SDL_Rect row = (SDL_Rect){
         0,
         i * CELL_SIZE,
         SCREEN_WIDTH,
         LINE_HEIGHT};
     SDL_FillRect(surface, &row, COLOR_GRAY);
+  }
+}
+
+// * Initialize the grid environment
+void initialize_environment(Cell environment[ROWS * COLUMNS]) {
+  for (int i = 0; i < ROWS; i++) {
+    for(int j = 0; j < COLUMNS; j++) {
+      // * Representing 2d grid in 1d array
+      environment[j + COLUMNS * i] = (Cell){WATER_CELL, 0, j, i};
+    }
+  }
+}
+
+// * Update the environment
+void draw_environment(SDL_Surface *surface, Cell environment[ROWS * COLUMNS]) {
+  for (int i = 0; i < ROWS * COLUMNS; i++) {
+    draw_cell(surface, environment[i]);
+  }
+}
+
+void simulation_step(Cell environment[ROWS * COLUMNS])
+{
+  // * Initialize next enviromnent state
+  Cell environment_next[ROWS * COLUMNS];
+  for (int i = 0; i < ROWS * COLUMNS; i++) {
+    environment_next[i] = environment[i];
+  }
+
+  for (int i = 0; i < ROWS; ++i) {
+    for (int j = 0; j < COLUMNS; ++j) {
+
+      Cell src_cell = environment[j + COLUMNS * i];
+      
+      // * Rule 1. Water flows down
+      if (src_cell.type == WATER_CELL && i < ROWS - 1) {
+        Cell dst_cell = environment[j + COLUMNS * (i + 1)];
+        // * Check if destination cell has space for liquid flow
+        if(dst_cell.fill_level < src_cell.fill_level) {
+          environment_next[j + COLUMNS * i].fill_level = 0;
+          environment_next[j + COLUMNS * (i + 1)].fill_level += src_cell.fill_level;
+        }
+      }
+
+      // * Rule 2. Water flowing left & right
+      if (i + 1 == ROWS || environment[j + COLUMNS * (i + 1)].fill_level >= 1.0 || environment[j + COLUMNS * (i + 1)].type == SOLID_CELL)
+      {
+        if (src_cell.type == WATER_CELL && j > 0 && j < COLUMNS - 1)
+        {
+          // * flow fluid to left
+          Cell dst_cell_left = environment[(j - 1) + COLUMNS * i];
+          if (dst_cell_left.type == WATER_CELL && dst_cell_left.fill_level < src_cell.fill_level) {
+            double delta_fill = (src_cell.fill_level - dst_cell_left.fill_level) / 3;
+            environment_next[j + COLUMNS * i].fill_level -= delta_fill;
+            environment_next[(j - 1) + COLUMNS * i].fill_level += delta_fill;
+            printf("Add left: %f\n", delta_fill);
+          }
+
+          // * flow fluid to right
+          Cell dst_cell_right = environment[(j + 1) + COLUMNS * i];
+          if (dst_cell_right.type == WATER_CELL && dst_cell_right.fill_level < src_cell.fill_level) {
+            double delta_fill = (src_cell.fill_level - dst_cell_right.fill_level) / 3;
+            environment_next[j + COLUMNS * i].fill_level -= delta_fill;
+            environment_next[(j + 1) + COLUMNS * i].fill_level += delta_fill;
+            printf("Add right: %f\n", delta_fill);
+          }
+            // printf("%f %f\n", src_cell.fill_level, delta_fill);
+        }
+      }
+    }
+  }
+
+  for (int i = 0; i < ROWS * COLUMNS; ++i) {
+    environment[i] = environment_next[i];
   }
 }
 
@@ -69,10 +165,14 @@ int main() {
       0);
 
   SDL_Surface *surface = SDL_GetWindowSurface(window);
-  draw_grid(surface);  
+
+  // * Model the cell grid
+  Cell environment[ROWS * COLUMNS];
+  initialize_environment(environment);
 
   // * Poll for events
   bool quit = false;
+  bool delete_mode = false;
   int current_cell_type = SOLID_CELL;
   while (!quit) {
     SDL_Event event;
@@ -86,22 +186,46 @@ int main() {
           if(event.motion.state != 0) {
             int cell_x = event.motion.x / CELL_SIZE;
             int cell_y = event.motion.y / CELL_SIZE;
+            double fill_level = delete_mode ? 0 : 1;
+            if(delete_mode != 0) {
+              current_cell_type = WATER_CELL;
+            }
             // printf("%d %d\n", cell_x, cell_y);
-            Cell cell = {current_cell_type, 0, cell_x, cell_y};
-            draw_cell(surface, cell);
+            Cell cell = {current_cell_type, fill_level, cell_x, cell_y};
+            environment[cell_x + COLUMNS * cell_y] = cell;
+            // draw_cell(surface, cell);
           }
+  
         } break;
+        case SDL_MOUSEBUTTONDOWN: {
+          int cell_x = event.motion.x / CELL_SIZE;
+          int cell_y = event.motion.y / CELL_SIZE; 
+          // printf("%d %d\n", cell_x, cell_y);
+          Cell cell = {WATER_CELL, 1, cell_x, cell_y};
+          environment[cell_x + COLUMNS * cell_y] = cell;
+        }
+        break;
         case SDL_KEYDOWN: {
           switch(event.key.keysym.sym) {
             case SDLK_SPACE: {
               current_cell_type = !current_cell_type;
             } break;
+            case SDLK_BACKSPACE: {
+              delete_mode = !delete_mode;
+            } break;
           }
         } break;
       }
+ 
+      // * Perform simulation steps
+      simulation_step(environment);     
+
+      // * Draw updates
+      draw_environment(surface, environment);
+      draw_grid(surface);  
       SDL_UpdateWindowSurface(window);
+      // SDL_Delay(10);
     }
   }
   SDL_Quit();
-  // SDL_Delay(3000);
 }
