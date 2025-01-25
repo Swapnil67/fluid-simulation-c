@@ -43,7 +43,7 @@ void draw_cell(SDL_Surface *surface, Cell cell) {
   SDL_FillRect(surface, &cell_rect, COLOR_BLACK);
   // * Water fill level
   if (cell.type == WATER_CELL) {
-    int water_height = cell.fill_level * CELL_SIZE;
+    int water_height = cell.fill_level > 1 ? CELL_SIZE : cell.fill_level * CELL_SIZE;
     // printf("%d \n", water_height);
     int empty_height = CELL_SIZE - water_height;
     SDL_Rect water_rect = (SDL_Rect){
@@ -95,8 +95,8 @@ void draw_environment(SDL_Surface *surface, Cell environment[ROWS * COLUMNS]) {
   }
 }
 
-void simulation_step(Cell environment[ROWS * COLUMNS])
-{
+// * Water flows down
+void simulation_phase_rule1(Cell environment[ROWS * COLUMNS]) {
   // * Initialize next enviromnent state
   Cell environment_next[ROWS * COLUMNS];
   for (int i = 0; i < ROWS * COLUMNS; i++) {
@@ -105,42 +105,26 @@ void simulation_step(Cell environment[ROWS * COLUMNS])
 
   for (int i = 0; i < ROWS; ++i) {
     for (int j = 0; j < COLUMNS; ++j) {
-
       Cell src_cell = environment[j + COLUMNS * i];
-      
-      // * Rule 1. Water flows down
       if (src_cell.type == WATER_CELL && i < ROWS - 1) {
+
         Cell dst_cell = environment[j + COLUMNS * (i + 1)];
-        // * Check if destination cell has space for liquid flow
-        if(dst_cell.fill_level < src_cell.fill_level) {
-          environment_next[j + COLUMNS * i].fill_level = 0;
-          environment_next[j + COLUMNS * (i + 1)].fill_level += src_cell.fill_level;
-        }
-      }
-
-      // * Rule 2. Water flowing left & right
-      if (i + 1 == ROWS || environment[j + COLUMNS * (i + 1)].fill_level >= 1.0 || environment[j + COLUMNS * (i + 1)].type == SOLID_CELL)
-      {
-        if (src_cell.type == WATER_CELL && j > 0 && j < COLUMNS - 1)
-        {
-          // * flow fluid to left
-          Cell dst_cell_left = environment[(j - 1) + COLUMNS * i];
-          if (dst_cell_left.type == WATER_CELL && dst_cell_left.fill_level < src_cell.fill_level) {
-            double delta_fill = (src_cell.fill_level - dst_cell_left.fill_level) / 3;
-            environment_next[j + COLUMNS * i].fill_level -= delta_fill;
-            environment_next[(j - 1) + COLUMNS * i].fill_level += delta_fill;
-            printf("Add left: %f\n", delta_fill);
+        // * if below cell has some space & above cell has water then 
+        // * let the water fall to below cell
+        // if(dst_cell.fill_level < src_cell.fill_level) {
+        if(dst_cell.fill_level < 1.0 && src_cell.fill_level > 0.02) {
+          double water_needed = 1.0 - environment[j + COLUMNS * (i + 1)].fill_level;
+          if (water_needed >= src_cell.fill_level && src_cell.fill_level > 0.0) {
+            printf("Add water: %f %f\n", water_needed, src_cell.fill_level);
+            environment_next[j + COLUMNS * i].fill_level = 0;
+            environment_next[j + COLUMNS * (i + 1)].fill_level += environment[j + COLUMNS * i].fill_level;
           }
-
-          // * flow fluid to right
-          Cell dst_cell_right = environment[(j + 1) + COLUMNS * i];
-          if (dst_cell_right.type == WATER_CELL && dst_cell_right.fill_level < src_cell.fill_level) {
-            double delta_fill = (src_cell.fill_level - dst_cell_right.fill_level) / 3;
-            environment_next[j + COLUMNS * i].fill_level -= delta_fill;
-            environment_next[(j + 1) + COLUMNS * i].fill_level += delta_fill;
-            printf("Add right: %f\n", delta_fill);
+          else {
+            // * If src_cell has fluid
+            environment_next[j + COLUMNS * i].fill_level -= water_needed;
+            // environment_next[j + COLUMNS * (i + 1)].fill_level += 1;
+            environment_next[j + COLUMNS * (i + 1)].fill_level += water_needed;
           }
-            // printf("%f %f\n", src_cell.fill_level, delta_fill);
         }
       }
     }
@@ -149,6 +133,62 @@ void simulation_step(Cell environment[ROWS * COLUMNS])
   for (int i = 0; i < ROWS * COLUMNS; ++i) {
     environment[i] = environment_next[i];
   }
+}
+
+// * Rule 2. Water flowing left & right
+void simulation_phase_rule2(Cell environment[ROWS * COLUMNS]) {
+  // * Initialize next enviromnent state
+  Cell environment_next[ROWS * COLUMNS];
+  for (int i = 0; i < ROWS * COLUMNS; i++) {
+    environment_next[i] = environment[i];
+  }
+
+ for (int i = 0; i < ROWS; ++i) {
+    for (int j = 0; j < COLUMNS; ++j) {
+      Cell src_cell = environment[j + COLUMNS * i];
+      // * If we hit the floor or below cell has fill_level >= 1 or below cell is solid cell
+      if (i + 1 == ROWS ||
+          environment[j + COLUMNS * (i + 1)].fill_level >= 1.0 ||
+          environment[j + COLUMNS * (i + 1)].type == SOLID_CELL)
+      {
+        // * flow fluid to left
+        if (src_cell.type == WATER_CELL && j > 0) {
+          Cell dst_cell_left = environment[(j - 1) + COLUMNS * i];
+          if (dst_cell_left.type == WATER_CELL && dst_cell_left.fill_level < src_cell.fill_level) {
+            double delta_fill = (src_cell.fill_level - dst_cell_left.fill_level) / 3;
+            // printf("%f %f\n", src_cell.fill_level, dst_cell_left.fill_level);
+            environment_next[j + COLUMNS * i].fill_level -= delta_fill;
+            environment_next[(j - 1) + COLUMNS * i].fill_level += delta_fill;
+            // printf("Add left: %f\n", delta_fill);
+          }
+        }
+
+        // * flow fluid to right
+        if (src_cell.type == WATER_CELL && j < COLUMNS - 1) {
+          Cell dst_cell_right = environment[(j + 1) + COLUMNS * i];
+            if (dst_cell_right.type == WATER_CELL && dst_cell_right.fill_level < src_cell.fill_level) {
+              double delta_fill = (src_cell.fill_level - dst_cell_right.fill_level) / 3;
+              environment_next[j + COLUMNS * i].fill_level -= delta_fill;
+              environment_next[(j + 1) + COLUMNS * i].fill_level += delta_fill;
+              // printf("Add right: %f\n", delta_fill);
+            }
+          // printf("%f %f\n", src_cell.fill_level, delta_fill);
+        }
+      }
+    }
+  }
+ 
+  for (int i = 0; i < ROWS * COLUMNS; ++i) {
+    environment[i] = environment_next[i];
+  }
+}
+
+void simulation_step(Cell environment[ROWS * COLUMNS]) {
+  // * Rule 1. Water flows down
+  simulation_phase_rule1(environment);
+
+  // * Rule 2. Water flowing left & right
+  simulation_phase_rule2(environment);
 }
 
 int main() {
