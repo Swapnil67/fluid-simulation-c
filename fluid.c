@@ -115,7 +115,7 @@ void simulation_phase_rule1(Cell environment[ROWS * COLUMNS]) {
         if(dst_cell.fill_level < 1.0 && src_cell.fill_level > 0.02) {
           double water_needed = 1.0 - environment[j + COLUMNS * (i + 1)].fill_level;
           if (water_needed >= src_cell.fill_level && src_cell.fill_level > 0.0) {
-            printf("Add water: %f %f\n", water_needed, src_cell.fill_level);
+            // printf("Add water: %f %f\n", water_needed, src_cell.fill_level);
             environment_next[j + COLUMNS * i].fill_level = 0;
             environment_next[j + COLUMNS * (i + 1)].fill_level += environment[j + COLUMNS * i].fill_level;
           }
